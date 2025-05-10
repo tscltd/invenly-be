@@ -1,9 +1,14 @@
-const express = require('express');
-const router = express.Router();
-const loanController = require('../controllers/loan.controller');
-// const authMiddleware = require('../middlewares/auth'); // nếu cần xác thực
+const authJwt = require("../middlewares/authJwt");
+const controller = require('../controllers/loan.controller');
 
-// router.post('/create-many', authMiddleware, loanController.createLoans);
-router.post('/create-many', loanController.createLoans);
+module.exports = function (app) {
+  app.use(function (req, res, next) {
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, Content-Type, Accept"
+    );
+    next();
+  });
 
-module.exports = router;
+  app.post('/loan/batch', authJwt.verifyToken, controller.createBatchLoan);
+}

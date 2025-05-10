@@ -1,47 +1,57 @@
-const Loan = require('../models/loan.model');
 const Item = require('../models/item.model');
-const mongoose = require('mongoose');
+const Loan = require('../models/loan.model');
 
-exports.createLoans = async (req, res) => {
-  const { codes, borrowerName, returnDueDate } = req.body;
-  const userId = req.userId; // từ middleware xác thực JWT nếu có
-
-  if (!codes || !Array.isArray(codes) || codes.length === 0) {
-    return res.status(400).json({ error: 'Chưa truyền danh sách mã vật phẩm' });
-  }
-
+exports.createBatchLoan = async (req, res) => {
   try {
-    const items = await Item.find({ code: { $in: codes }, isDeleted: { $ne: true } });
+    const { borrowerName, items } = req.body;
 
-    if (items.length !== codes.length) {
-      return res.status(400).json({ error: 'Một số mã vật phẩm không tồn tại' });
+    if (!borrowerName || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Thiếu thông tin mượn' });
     }
 
     const now = new Date();
-    const loans = [];
 
-    for (const item of items) {
-      if (item.isLoaned) continue;
+    // Lấy danh sách mã cần kiểm tra
+    const itemCodes = items.map(i => i.code);
+    const dbItems = await Item.find({ code: { $in: itemCodes }, isLoaned: false, isDeleted: { $ne: true } });
+
+    const successLoans = [];
+    const failedCodes = [];
+
+    for (const itemData of items) {
+      const dbItem = dbItems.find(i => i.code === itemData.code);
+
+      if (!dbItem) {
+        failedCodes.push(itemData.code);
+        continue;
+      }
 
       const loan = new Loan({
-        itemId: item._id,
+        itemId: dbItem._id,
         borrowerName,
         loanDate: now,
-        returnDueDate: returnDueDate || null,
+        returnDueDate: itemData.returnDueDate,
         status: 'borrowed',
-        createdBy: userId,
+        damaged: itemData.damaged || false,
+        damageNote: itemData.damageNote || '',
+        borrowerImageUrl: itemData.borrowerImageUrl || '',
+        createdBy: req.user._id, // ✅ lấy từ token
       });
 
       await loan.save();
-      item.isLoaned = true;
-      await item.save();
+      dbItem.isLoaned = true;
+      await dbItem.save();
 
-      loans.push(loan);
+      successLoans.push(loan);
     }
 
-    res.json({ message: `Đã tạo ${loans.length} phiếu mượn`, loans });
+    return res.json({
+      message: `Đã ghi nhận ${successLoans.length} vật phẩm mượn`,
+      success: successLoans.length,
+      failed: failedCodes,
+    });
   } catch (err) {
-    console.error('[LOAN ERROR]', err);
-    res.status(500).json({ error: 'Lỗi server khi tạo phiếu mượn' });
+    console.error('Lỗi tạo phiếu mượn:', err);
+    return res.status(500).json({ error: 'Lỗi server' });
   }
 };
